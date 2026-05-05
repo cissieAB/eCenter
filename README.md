@@ -54,9 +54,13 @@ git submodule status
 
 A `-` prefix means not yet initialized. A `+` prefix means the checked-out commit differs from what the parent repo tracks (i.e., you have a newer or older commit locally).
 
-## Work on a Submodule
+## How to Work with This Repo
 
-Submodules start in **detached HEAD** state. To make changes and push back to the sub-project:
+The parent repo stores a **commit pointer** (SHA) for each submodule, not the code itself. Any time a submodule's commit advances — whether you made the change or pulled from upstream — you need to record the new pointer in the parent with a commit. This keeps the parent always tracking exactly which versions of the sub-projects work together.
+
+### Make changes inside a submodule
+
+Submodules start in **detached HEAD** state. Check out a branch before making changes:
 
 ```bash
 cd dpu-telemetry-eBPF
@@ -65,10 +69,29 @@ git checkout main          # or whichever branch you want
 git commit -am "your change"
 git push
 cd ..
-git add dpu-telemetry-eBPF # record the new commit reference in the parent
+git add dpu-telemetry-eBPF # stage the new commit pointer
 git commit -m "bump dpu-telemetry-eBPF to <sha>"
 git push
 ```
+
+### Pull upstream changes to a submodule
+
+```bash
+git submodule update --remote --merge dpu-telemetry-eBPF
+git add dpu-telemetry-eBPF
+git commit -m "bump dpu-telemetry-eBPF to <sha>"
+git push
+```
+
+### Check what needs recording
+
+```bash
+git submodule status
+```
+
+- `-` prefix → submodule not initialized yet (`git submodule update --init`)
+- `+` prefix → submodule is ahead of what the parent tracks → needs a bump commit
+- no prefix → in sync
 
 ## Viz Prototype
 
