@@ -1,0 +1,7 @@
+[submodule "dpu-telemetry-eBPF"]
+	path = dpu-telemetry-eBPF
+	url = https://github.com/JeffersonLab/dpu-telemetry-eBPF.git
+
+[submodule "ld2606_daos_redis"]
+	path = ld2606_daos_redis
+	url = https://github.com/cissieAB/ld2606_daos_redis.git
