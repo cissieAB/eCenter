@@ -5,3 +5,7 @@
 [submodule "ld2606_daos_redis"]
 	path = ld2606_daos_redis
 	url = https://github.com/cissieAB/ld2606_daos_redis.git
+
+[submodule "ldrd2606_frontend"]
+	path = ldrd2606_frontend
+	url = https://github.com/RaiqaRasool/ldrd2606_frontend.git
