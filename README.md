@@ -11,7 +11,6 @@ eCenter/
 ├── dpu-telemetry-eBPF/   # eBPF traffic counter (submodule → JeffersonLab/dpu-telemetry-eBPF)
 ├── ld2606_daos_redis/    # Redis backend + simulator + DAOS client (submodule → cissieAB/ld2606_daos_redis)
 ├── ldrd2606_frontend/    # React + Vite + Cytoscape.js dashboard (submodule → RaiqaRasool/ldrd2606_frontend)
-├── viz/                  # Go viz backend + browser UI (vis.js + uPlot)
 └── CLAUDE.md             # Architecture documentation
 ```
 
@@ -149,11 +148,3 @@ git submodule status
 - `-` prefix → submodule not initialized yet (`git submodule update --init`)
 - `+` prefix → submodule is ahead of what the parent tracks → needs a bump commit
 - no prefix → in sync
-
-## Viz Prototype
-
-A standalone browser demo (mock data, no Redis required) lives in `viz/demo.html`. Open it directly in any browser:
-
-```bash
-open viz/demo.html
-```
