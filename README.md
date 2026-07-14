@@ -16,7 +16,7 @@ eCenter/
 
 ## Clone
 
-Always clone with `--recurse-submodules` to pull both sub-projects:
+Always clone with `--recurse-submodules` to pull all three sub-projects:
 
 ```bash
 git clone --recurse-submodules https://github.com/cissieAB/eCenter.git
@@ -100,6 +100,8 @@ git submodule update --remote --merge
 git submodule update --remote --merge dpu-telemetry-eBPF
 # or
 git submodule update --remote --merge ld2606_daos_redis
+# or
+git submodule update --remote --merge ldrd2606_frontend
 ```
 
 ### Check submodule status
