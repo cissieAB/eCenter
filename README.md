@@ -93,7 +93,7 @@ docker compose -f compose.dev.yaml --profile tools down
 ```bash
 # Pull parent repo changes + advance all submodules to their latest remote commit
 git pull
-git submodule update --remote --merge
+git submodule update --remote --recursive
 ```
 
 ### Update a specific submodule only
