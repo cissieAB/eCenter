@@ -4,6 +4,8 @@ Real-time multi-node network traffic monitoring and visualization for JLab LDRD 
 
 See `CLAUDE.md` for the full architecture design and decisions.
 
+For backend, Redis, and React frontend setup using simulated traffic or the TC ingress collector, see the [setup guide](docs/setup.md).
+
 ## Repository Structure
 
 ```
