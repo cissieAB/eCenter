@@ -149,6 +149,45 @@ iperf3 -s -B 129.57.178.86
 iperf3 -c 129.57.178.86 -B <ebpf2201-ip> -t 30 -P 4
 ```
 
+### Pushing to 100 Gbps
+
+The light example above won't saturate a 100G link on its own. To drive
+line-rate traffic between two 100G-capable NICs, use ESnet's `iperf3` (see
+[`iperf3.md`](../dpu-telemetry-eBPF/docs/iperf3.md) for the build steps) with
+multiple parallel streams:
+
+```bash
+# on ebpf2203 (server), bind to the 100G interface's IP
+iperf3 -s -B 129.57.178.86
+
+# on ebpf2201 (client)
+iperf3 -c 129.57.178.86 -B <ebpf2201-100g-ip> -t 60 -P 8
+```
+
+`-P 8` runs 8 parallel TCP streams — a single stream rarely saturates a 100G
+NIC. This combination reached 98.4 Gbps in prior testing between two 100G
+DPU interfaces. If throughput falls short, apply these tuning steps on both
+hosts before retrying:
+
+```bash
+sudo ip link set $IFACE mtu 9000                    # jumbo frames
+sudo cpupower frequency-set -g performance           # avoid CPU frequency scaling
+sudo sysctl -w net.core.rmem_max=134217728           # 128 MiB socket buffers
+sudo sysctl -w net.core.rmem_default=134217728
+sudo sysctl -w net.core.wmem_max=134217728
+sudo sysctl -w net.core.wmem_default=134217728
+```
+
+For UDP at line rate, add `-u -b <target>G -l 8948` (packet length tuned for
+a 9000-byte MTU); expect UDP throughput and stability to be more sensitive to
+stream count than TCP — see `iperf3.md` for measured single- vs.
+multi-stream UDP numbers.
+
+Cross-check the collector's counted bytes against `iperf3`'s reported
+transfer size once the run finishes — they should agree closely, e.g.
+`sudo bpftool map dump pinned /sys/fs/bpf/tc-ing` on the receiving host, or
+`--verbose` collector output, against the client's `[SUM] ... sender` line.
+
 Check the directed edge landed in Redis and the backend:
 
 ```bash
