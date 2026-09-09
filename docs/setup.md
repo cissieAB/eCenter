@@ -9,6 +9,8 @@ Choose one traffic source for a run:
 - **Simulator:** generated records → Redis → backend → frontend.
 - **Real telemetry:** incoming IPv4 TCP/UDP traffic → TC ingress map → userspace collector → Redis → backend → frontend.
 
+For a worked example of real telemetry across multiple nodes — including common `sudo`/NFS/SELinux pitfalls and how to register hosts in the topology file — see [two-host-real-traffic.md](two-host-real-traffic.md).
+
 ## Directories and prerequisites
 
 Replace all `<...>` placeholders before running commands. Commands that change directory use absolute placeholders so they work with either separate clones or eCenter submodules.
