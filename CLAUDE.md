@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Target System Design
+Known bugs and open work are tracked in [TODO.md](TODO.md). Several items there are
+load-bearing for anything described below — in particular, two of the three eBPF
+kernel objects do not currently compile.
 
-The goal is a **real-time, multi-node network traffic monitoring and visualization system** for JLab LDRD 100Gbps testbeds. This is the full intended architecture — current code covers parts of it; the gaps are what remain to be built.
+## System Design
+
+A **real-time, multi-node network traffic monitoring and visualization system** for JLab LDRD 100Gbps testbeds.
 
 ```
  Node A                     Node B                     Node C
@@ -18,60 +22,66 @@ The goal is a **real-time, multi-node network traffic monitoring and visualizati
  └────────┬────────┘        └────────┬────────┘        └────────┬────────┘
           └──────────────────────────┼──────────────────────────┘
                                      ↓
-                             Redis (shared, remote)
-                             SET traffic:{src_ip}:{dst_ip}
-                             TTL = 3600s
+                        Redis Stack (shared, remote)
+                        HSET packet:{dest_ip}:{source_ip}:{ts}
+                        TTL = 3600s · RediSearch index idx:packets
                                      ↓
-                          Go viz backend (1s ticker)          DAOS backend service
-                          SCAN traffic:* → directed graph      (drains Redis → DAOS)
-                                     ↓ WebSocket
+                       Go backend (1s ticker)         DAOS drain worker
+                       FT.AGGREGATE/FT.SEARCH          (drains Redis → DAOS)
+                       → directed graph
+                                     ↓ WebSocket /ws
                                   Browser
                           ┌────────────────────────┐
-                          │ Topo view              │
-                          │ (directed graph,       │
+                          │ Graph view             │
+                          │ (Cytoscape.js,         │
                           │  edge = active flow,   │
-                          │  weight = total_bytes) │
+                          │  color = total_bytes)  │
                           │                        │
-                          │ click edge →           │
-                          │ Detail view            │
-                          │ (time-series plots:    │
+                          │ hover/click edge →     │
+                          │ Detail panel           │
+                          │ (inline SVG charts:    │
                           │  tcp/udp bytes/pkts)   │
                           └────────────────────────┘
 ```
 
-**What each node writes per second** (one Redis key per active `src→dst` flow, TTL 3600s):
-```json
-{
-  "total_bytes": 1024,
-  "tcp_bytes":    [...],
-  "udp_bytes":    [...],
-  "tcp_packets":  [...],
-  "udp_packets":  [...]
-}
-```
+**What each producer writes per second** — one Redis **hash** per directed flow per second,
+key `packet:{dest_ip}:{source_ip}:{timestamp}`, TTL 3600s:
+
+| Field | Type | Notes |
+|---|---|---|
+| `timestamp` | int | Unix seconds; indexed and sortable |
+| `source_ip`, `dest_ip` | string | dotted-quad IPv4 |
+| `samples_per_second` | int | array length; the collector's poll Hz |
+| `total_packets`, `total_bytes` | int | `total_bytes` is indexed |
+| `tcp_bytes`, `tcp_packets`, `udp_bytes`, `udp_packets` | JSON array string | one entry per sub-second poll tick |
+
+Note the key puts **dest before source**, while every JSON/HTTP payload orders them
+`src` then `dest`. All three producers/consumers agree on this
+(`tc_userspace.cpp`, `simulator_v3.py`, `backend/edge_history.go`) — it is easy to
+get backwards when writing new code against it.
 
 **Key architectural decisions:**
-- `tc_collector` writes to Redis directly via hiredis — not stdout sidecar (multi-NIC nodes would corrupt a shared pipe)
-- Each NIC has a unique IP, so `traffic:{src_ip}:{dst_ip}` keys never collide across instances
-- Flows are **directed** — `A→B` and `B→A` are separate edges, no merging
-- Viz backend polls Redis every 1s (not pub/sub) — at 1s granularity, polling keeps the backend stateless; Redis TTL handles expiry automatically
-
-**Gaps to build:**
-1. hiredis write integration in `tc_collector`
-2. Go viz backend (replaces/extends `ld2606_daos_redis/backend`)
-3. Browser viz (topo view + detail view)
+- `tc_collector` writes to Redis directly via hiredis — not a stdout sidecar (multi-NIC nodes would corrupt a shared pipe via `PIPE_BUF` interleaving)
+- Each NIC has a unique IP, so keys never collide across collector instances on one node
+- Flows are **directed** — `A→B` and `B→A` are separate keys and separate graph edges, no merging
+- The backend polls Redis every 1s (not pub/sub) — at 1s granularity, push offers no latency benefit, and polling keeps the backend stateless
+- The timestamp is **in the key**, so history is queried by time range rather than accumulated in backend memory. This is what makes `/history` replay possible, and it is why the DAOS drain's delete-after-archive behavior conflicts with the UI (see TODO.md §A)
 
 ---
 
 ## Repository Overview
 
-This is a multi-project JLab LDRD research repository with two independent sub-projects, each with its own `.git` history:
+Three independent sub-projects, each a git submodule with its own `.git` history:
 
-- **`dpu-telemetry-eBPF/`** — eBPF-based DPU network traffic counter (C/C++, kernel + userspace) · [github.com/JeffersonLab/dpu-telemetry-eBPF](https://github.com/JeffersonLab/dpu-telemetry-eBPF)
-- **`ld2606_daos_redis/`** — Real-time traffic monitoring pipeline with Redis pub/sub, WebSocket streaming, and DAOS storage (Go backend + Python simulator + DAOS client) · [github.com/cissieAB/ld2606_daos_redis](https://github.com/cissieAB/ld2606_daos_redis)
-- **`viz/`** *(planned, new)* — Go viz backend + browser UI (vis.js + uPlot); the only component that does not belong to either sub-project
+- **`dpu-telemetry-eBPF/`** — eBPF DPU network traffic counter (C kernel + C++ userspace) · [github.com/JeffersonLab/dpu-telemetry-eBPF](https://github.com/JeffersonLab/dpu-telemetry-eBPF)
+- **`ld2606_daos_redis/`** — Go backend + Python traffic simulator + DAOS drain worker · [github.com/cissieAB/ld2606_daos_redis](https://github.com/cissieAB/ld2606_daos_redis)
+- **`ldrd2606_frontend/`** — React + Vite + Cytoscape.js dashboard · [github.com/RaiqaRasool/ldrd2606_frontend](https://github.com/RaiqaRasool/ldrd2606_frontend)
 
-Both sub-projects are intended to be **git submodules** of a parent `eCenter` repo. Clone with `git clone --recurse-submodules <url>`. New viz code lives directly in the parent repo under `viz/`.
+Clone with `git clone --recurse-submodules <url>`. The parent repo holds only
+`README.md`, `CLAUDE.md`, `TODO.md`, and `docs/`.
+
+Setup walkthroughs live in [docs/setup.md](docs/setup.md) and
+[docs/two-host-real-traffic.md](docs/two-host-real-traffic.md).
 
 ---
 
@@ -79,83 +89,115 @@ Both sub-projects are intended to be **git submodules** of a parent `eCenter` re
 
 ### Architecture
 
-Kernel-space eBPF programs (C) attach to network interfaces via TC (Traffic Control) or XDP hooks and populate pinned BPF LRU hash maps. A C++ userspace collector (`tc_collector`) polls those maps at a configurable frequency, computes per-interval deltas, and emits JSON time-series metrics per source/destination IP.
+Kernel-space eBPF programs (C) attach to network interfaces via TC or XDP hooks and
+populate pinned BPF LRU hash maps. A C++ userspace collector (`tc_collector`) polls
+those maps at a configurable frequency, computes per-interval deltas, and writes one
+Redis hash per directed flow per second.
 
 ```
 NIC → TC ingress/egress or XDP hook (eBPF kernel, C) → BPF LRU hash map (pinned)
                                                               ↓
                                           tc_collector (C++, userspace poller)
-                                            └─ 60-second ring buffer → JSON output
+                                            ├─ 60-slot ring buffer, 1 slot/second
+                                            └─ hiredis pipelined HSET + EXPIRE
 ```
 
-Main code lives in `traffic_counter/`. Experimental ringbuf work is on the `ring_buf` and `per-core-map` branches. `simple-tc-demo/` has minimal standalone examples.
+### Layout
+
+| Path | Contents |
+|---|---|
+| `eCounter/v1_userspace-poll/` | The working implementation — all kernel programs, the C++ collector, CMake build, sample data |
+| `eCounter/wip_ringbuf/` | Incomplete ringbuf experiment (a single stub file) |
+| `simple-demos/` | Minimal standalone examples: `demo_ringbuf/`, `demo_traffic-control/` |
+| `scripts/` | pktgen, iperf3, MTU/ring/XPS tuning, and plotting helpers |
+| `docs/` | Traffic-collection notes, network headers, pktgen and iperf3 guides |
+
+Further ringbuf and per-CPU-map work lives on the `ring_buf` and `per-core-map`
+remote branches, not in the working tree.
 
 ### Build & Run
 
 ```bash
-cd traffic_counter
+cd dpu-telemetry-eBPF/eCounter/v1_userspace-poll
 
-# Compile all three eBPF kernel objects (auto-detects aarch64)
+# Compile the eBPF kernel objects (auto-detects aarch64 include path)
 ./compile_kernel.sh
-# Produces: kernel_ingress_tc.o, kernel_egress_tc.o, kernel_ingress_xdp.o
+# Intended output: kernel_ingress_tc.o, kernel_egress_tc.o, kernel_ingress_xdp.o
+# CURRENTLY BROKEN: only kernel_ingress_tc.c compiles; the egress and XDP
+# programs still use the pre-rename single-`ip` key field. See TODO.md §A.
 
 # Attach TC hooks (requires root)
 sudo tc qdisc add dev <iface> clsact
 sudo tc filter add dev <iface> ingress bpf da obj kernel_ingress_tc.o sec tc-ing
 sudo tc filter add dev <iface> egress  bpf da obj kernel_egress_tc.o  sec tc-eg
 
-# Attach XDP hook (alternative, requires MTU ≤ 3498 for driver mode)
+# Attach XDP hook (alternative; MTU ≤ 3498 for driver mode, else it falls back
+# to generic mode, which is slower than TC)
 sudo ip link set dev <iface> xdp obj kernel_ingress_xdp.o sec xdp-ing
 
-# Build the C++ userspace collector
+# Build the C++ collector (needs libbpf, hiredis, pthread)
 cmake -B build && cmake --build build
-# Produces: build/tc_collector
 
-# Run (default: 20 Hz polling, map at /sys/fs/bpf/tc-eg)
+# Run
 sudo ./build/tc_collector
-sudo ./build/tc_collector -p 4000 -m /sys/fs/bpf/map_in_xdp -v
+sudo ./build/tc_collector -p 100 -m /sys/fs/bpf/map_in_xdp --redis-host redis-host -v
 ```
 
-**CLI flags**: `-p|--poll-hz FREQ` (10–4000), `-m|--map-path PATH`, `-v|--verbose`
+**CLI flags** (`parse_args` in `tc_userspace.cpp`):
+
+| Flag | Default | Notes |
+|---|---|---|
+| `-p`, `--poll-hz` | `20` | Must be a positive **divisor of 1000000** — 3, 7, and 300 are rejected |
+| `-m`, `--map-path` | `/sys/fs/bpf/tc-eg` | Pinned map to poll |
+| `--redis-host` | `localhost` | |
+| `--redis-port` | `6379` | |
+| `--redis-ttl` | `3600` | Seconds; must be positive |
+| `-v`, `--verbose` | off | Not listed by `print_usage` |
+
+Any unrecognized argument prints usage and exits 1.
 
 ### Data Structures (`tc_common.h`)
 
 ```c
-struct traffic_key_t { __u32 ip; __u8 proto; __u8 pad[3]; };  // map key
-struct traffic_val_t { __u64 packets; __u64 bytes; };           // map value
+struct traffic_key_t {
+    __u32 source_ip;        // network byte order
+    __u32 destination_ip;   // network byte order
+    __u8  proto;            // IPPROTO_TCP / IPPROTO_UDP only
+    __u8  pad[3];           // BPF verifier requires 4-byte key alignment
+};
+struct traffic_val_t { __u64 packets; __u64 bytes; };
 ```
 
-Map type: `BPF_MAP_TYPE_LRU_HASH`, 2048 max entries. Kernel programs track ingress by **source IP**, egress by **destination IP**.
+Map type `BPF_MAP_TYPE_LRU_HASH`, `max_entries` 2048. Note this key is
+(src, dst, proto) — cardinality is squared relative to the older single-IP key,
+so 2048 entries is likely undersized for a 100G testbed (TODO.md §A).
 
-### JSON Output Format
+Byte counts come from `bpf_ntohs(ip->tot_len)`, i.e. L3 and above — the Ethernet
+header is not counted.
 
-60-second sliding ring buffer, one snapshot per second, keyed by Unix timestamp then IP (as integer):
+### Collector behavior
 
-```json
-{"1763113319": {"2449791234": {"tcp_bytes": [...], "tcp_packets": [...], "udp_bytes": [...], "udp_packets": [...]}}}
-```
+- Maintains a 60-slot ring buffer, one slot per second, indexed by `timestamp % 60`.
+- Each poll tick writes **absolute** counters into bin `polling_id` of the current slot.
+- At each second boundary a reporter thread diffs consecutive bins against a
+  per-edge `last_seen`, emits only edges with a non-zero delta, writes them to
+  Redis, and zeroes the slot.
+- Edges whose counters go backwards (LRU eviction, restart) are detected but not
+  reliably distinguishable from genuine resets — see the `@bug` comments in
+  `get_diff_vector`.
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `kernel_ingress_tc.c` | TC ingress hook — counts by source IP (map `map_in_tc`, section `tc-ing`) |
-| `kernel_egress_tc.c` | TC egress hook — counts by dest IP (map `map_out_tc`, section `tc-eg`) |
-| `kernel_ingress_xdp.c` | XDP ingress hook — counts by source IP (map `map_in_xdp`, section `xdp-ing`) |
-| `tc_userspace.cpp` | C++ collector: polls map, maintains ring buffer, outputs JSON |
-| `tc_common.h` | Shared `traffic_key_t` / `traffic_val_t` structs |
-| `compile_kernel.sh` | Clang compilation script for all three kernel objects |
-| `CMakeLists.txt` | C++17 build config, links libbpf and pthread |
-
-### Redis Integration (planned)
-
-`tc_collector` will write directly to Redis via **hiredis** (not via stdout pipe to a sidecar).
-
-**Rationale**: A node may run multiple `tc_collector` instances (one per NIC). Merging their stdout streams into a shared sidecar risks JSON corruption — Linux `PIPE_BUF` (4096 bytes) makes concurrent writes from multiple processes non-atomic. Direct hiredis gives each instance an independent connection with no coordination needed.
-
-**Key schema**: `traffic:{src_ip}:{dst_ip}` — no interface field needed because each NIC has a unique IP, so keys are naturally non-overlapping across instances.
-
-**Write pattern**: Pipeline all IP-pair writes for a given 1-second window in one `redisAppendCommand` / `redisGetReply` round-trip. Set TTL = 3600s — keys must survive long enough for the DAOS backend service to drain them from Redis into DAOS. No pub/sub — the viz backend polls directly (see Visualization section below).
+| `kernel_ingress_tc.c` | TC ingress hook (map `map_in_tc`, section `tc-ing`) |
+| `kernel_egress_tc.c` | TC egress hook (map `map_out_tc`, section `tc-eg`) |
+| `kernel_ingress_xdp.c` | XDP ingress hook (map `map_in_xdp`, section `xdp-ing`) |
+| `tc_userspace.cpp` | C++ collector: polls the map, ring buffer, diffing, Redis writes |
+| `tc_common.h` | Shared `traffic_key_t` / `traffic_val_t` |
+| `json.hpp` | Vendored nlohmann/json |
+| `compile_kernel.sh` | Clang build for all three kernel objects |
+| `CMakeLists.txt` | C++17 build; links `bpf`, `pthread`, `hiredis` |
 
 ---
 
@@ -164,132 +206,185 @@ Map type: `BPF_MAP_TYPE_LRU_HASH`, 2048 max entries. Kernel programs track ingre
 ### Architecture
 
 ```
-Traffic Simulator (Python)
-  └─ publishes JSON packets → Redis Pub/Sub channel
-                                  ↓
-                           Go Backend Server
-                             ├─ aggregates latest state (RWMutex)
-                             ├─ HTTP GET /latest  → snapshot
-                             └─ WebSocket /ws     → live stream
+simulator_v3.py (or tc_collector)
+  └─ HSET packet:{dest}:{src}:{ts}  → Redis Stack
+                                        ↓  FT.AGGREGATE / FT.SEARCH on idx:packets
+                                  Go Backend
+                                    ├─ 1s poller → selected live frame (RWMutex)
+                                    ├─ GET  /latest   → snapshot
+                                    ├─ GET  /edge     → one edge, live or historical
+                                    ├─ GET  /history  → paginated frames
+                                    └─ WS   /ws       → snapshot + live stream
+                                        ↓
+                            redis_daos_drain.py → DAOS
 ```
 
-DAOS client (`daos-client/`) is a placeholder — not yet implemented.
+Redis must be **Redis Stack** (or otherwise have the RediSearch module): the
+backend creates and queries the `idx:packets` index and will not work against
+plain Redis.
 
 ### Backend (Go)
 
 ```bash
 cd ld2606_daos_redis/backend
-
-# First-time setup
-./setup.sh
-
-# Run (defaults: Redis at localhost:6379, port 8080)
 go run .
-
-# With overrides
-DEBUG=true REDIS_ADDR=localhost:6379 SERVER_PORT=8080 REDIS_CHANNEL=traffic_channel go run .
-
-# Build binary
 go build -o backend .
+go test ./...
 ```
 
-**Go module**: `go 1.25.5`, deps: `gorilla/websocket v1.5.3`, `go-redis/v9 v9.17.3`
+**Module**: `go 1.25.5`; deps `gorilla/websocket v1.5.3`, `redis/go-redis/v9 v9.17.3`.
 
-**HTTP endpoints**: `GET /` (health), `GET /latest` (latest JSON), `GET /ws` (WebSocket)
+**Environment** (`config.go`):
 
-**Concurrency design** (see `backend/PROJECT_SUMMARY.md`): RWMutex guards the `latest` state (read-heavy); a separate Mutex guards the WebSocket clients map; a buffered channel (size 100) decouples pub/sub ingestion from WebSocket fan-out.
+| Var | Default | Notes |
+|---|---|---|
+| `REDIS_ADDR` | `localhost:6379` | |
+| `REDIS_DB` | `0` | Malformed values are silently ignored |
+| `SERVER_PORT` | `:8080` | Passed straight to `ListenAndServe` — **the colon is required** |
+| `POLL_INTERVAL` | `1s` | Any `time.ParseDuration` string |
+| `TOPOLOGY_PATH` | `config/topology.json` | Startup fails if unreadable or invalid |
+| `DEBUG` | unset | `true` or `1` |
 
-**Key source files**: `config.go`, `redis.go`, `websocket.go`, `handlers.go`, `types.go`, `main.go`
+There is no `REDIS_CHANNEL` and no pub/sub — that path was replaced by RediSearch polling.
+
+**HTTP endpoints**:
+
+| Route | Behavior |
+|---|---|
+| `GET /latest` | `{type, data}` snapshot of the current live frame |
+| `GET /edge?src=&dest=` | Full sample arrays for one directed edge, latest frame |
+| `GET /edge?src=&dest=&timestamp=` | Same, read directly from the `packet:` key at that second |
+| `GET /history?start=&end=&limit=` | Paginated `HistoryFrame` list; `limit` 1–120, default 60 |
+| `GET /ws` | Sends `{type:"snapshot", topology, data}` first, then a snapshot per poll |
+| `GET /` | Health check — currently answers 200 for *any* unmatched path |
+
+Only the initial WebSocket message carries `topology`; the frontend keeps it for
+the life of the connection.
+
+**Topology** is a static JSON file, not Redis-derived. `loadTopology` validates
+that every key is a real IPv4 address matching its `ip` field and that `rack` is
+non-empty. `simulator_v3.py` *also* writes `topology:node:{ip}` hashes into Redis,
+but nothing reads them — a duplicated source of truth (TODO.md §B).
+
+**Concurrency**: an RWMutex guards the `latest` frame (read-heavy); a separate
+Mutex guards the WebSocket client map; a buffered channel (size 100) decouples
+polling from fan-out and drops snapshots rather than blocking when full.
+
+**Source files**: `main.go`, `config.go`, `state.go`, `types.go`, `utils.go`,
+`topology.go`, `redis.go`, `redis_index.go`, `redis_document.go`, `live.go`,
+`history.go`, `edge_history.go`, `handlers.go`, `websocket.go`, `broadcast.go`.
 
 ### Traffic Simulator (Python)
 
+**Use `simulator_v3.py`.** It is the only version matching the current backend
+contract — one aggregated record per directed edge per second, plus the topology
+registration the older versions lack. `simulator_bk.py` and `simulator_v2.py`
+predate the aggregation change (they write one key *per packet*, timestamp in
+milliseconds) and are kept only for reference.
+
 ```bash
 cd ld2606_daos_redis/traffic-simulator
+./setup.sh && source venv/bin/activate
 
-# First-time setup (creates venv)
-./setup.sh
-source venv/bin/activate
-
-# Run basic simulation (1 node, 100 pps, Redis storage enabled)
-python simulator_bk.py --redis-host localhost
-
-# Run V2 (recommended for ejfat-5/6 nodes)
-python simulator_v2.py --redis-host localhost --nodes 5 --packets-per-second 500 --duration 60
-
-# MPI version for distributed simulation
-mpirun -n <N> python traffic_simulator_mpi.py
+python simulator_v3.py --redis-host localhost --nodes 8 --duration 999999
 ```
 
-**Python deps**: `redis>=5.0.0`, `flask>=3.0.0` (see `requirements.txt`)
+Flags: `--redis-host/--redis-port/--redis-db`, `--nodes` (1–255),
+`--nodes-per-rack`, `--samples-per-second`/`--sps`, `--duration`, `--ttl`,
+`--stats-interval`.
 
-**Simulator versions**: `simulator_bk.py` (original), `simulator_v2.py` (two modes, tested on cluster), `traffic_simulator_mpi.py` (distributed)
+Node *n* is assigned IP `192.168.110.{n+1}`, racked as `rack-{n // nodes_per_rack + 1}`.
+These must line up with `backend/config/topology.json` or the endpoints render as
+`external`. One `HPCNode` thread per node emits to every other node, so the write
+rate is `N*(N-1)` records/second.
 
-### Redis Data Format
+`traffic_simulator_mpi.py` is a separate distributed variant (`mpirun -n <N>`).
 
-Packets are stored as hashes with key `packet:{dest_ip}:{source_ip}:{timestamp}` (TTL: 1 hour) and published as JSON to the configured channel:
+**Python deps**: `redis>=5.0.0`, `flask>=3.0.0`.
 
-```json
-{
-  "timestamp": 1770147907,
-  "source_ip": "192.168.45.123",
-  "dest_ip": "10.0.78.234",
-  "total_bytes": 1024,
-  "udp_packets": [...],
-  "udp_bytes": [...],
-  "tcp_packets": [...],
-  "tcp_bytes": [...]
-}
+### DAOS drain worker
+
+`daos-client/redis_daos_drain.py` scans `packet:*`, bulk-writes to a DAOS DDict via
+`pydaos`, then **deletes the drained keys from Redis**. It needs DAOS client
+libraries on `LD_LIBRARY_PATH`/`PYTHONPATH`; `--dry-run` skips the DAOS write but
+still deletes.
+
+```bash
+python3 redis_daos_drain.py --daos-pool telemetry_pool --daos-cont telemetry
 ```
+
+The delete-after-archive design is in direct tension with the backend's `/history`
+endpoint, which reads the same keys. Resolve before running the two together
+(TODO.md §A).
+
+### Local stack (Docker Compose)
+
+```bash
+cd ld2606_daos_redis
+docker compose -f compose.dev.yaml --profile tools up -d
+docker compose -f compose.dev.yaml exec -d simulator \
+  python simulator_v3.py --redis-host redis --nodes 8 --duration 999999
+```
+
+Three services: `redis` (redis-stack-server, healthchecked), `backend`
+(`go run .` on `:8080`, hot-reloaded from a volume mount), and `simulator`
+(idles on `sleep infinity` behind the `tools` profile — a shell to `exec` into,
+not a generator on its own). The frontend is **not** in this compose file; run it
+separately.
 
 ---
 
-## Planned Visualization (new component)
+## Project 3: ldrd2606_frontend
 
-### Architecture
+React 19 + Vite + TypeScript, graph rendering by **Cytoscape.js**. There is no
+charting library — the per-edge detail plots are hand-rolled inline SVG in
+`TrafficGraph.tsx`. Nothing is loaded from a CDN.
 
+```bash
+cd ldrd2606_frontend
+npm install
+npm run dev      # Vite dev server, proxies /edge /history /ws → localhost:8080
+npm test         # tsx --test src/*.test.ts
+npm run lint     # oxlint
+npm run build    # tsc -b && vite build
 ```
-tc_collector (hiredis) → SET traffic:{src_ip}:{dst_ip} {data} EX 3600
-                                        ↓
-                          Go viz backend (1s ticker)
-                            └─ SCAN traffic:* → build directed graph
-                            └─ WebSocket push → browsers
-                                        ↓
-                          Browser
-                            ├─ Topo view: directed graph of active flows
-                            └─ Detail view: click edge → fine-grained time-series plots
-```
 
-### Key Decisions
+The dev server proxies to `localhost:8080`; `vite.config.local.ts` is an untracked
+scratch variant pointing at `:8090`.
 
-**Q1 — Redis write method**: `tc_collector` writes directly via hiredis (not stdout sidecar). Reason: nodes have multiple NICs, each running a separate instance; stdout pipe merging causes `PIPE_BUF` corruption.
+### Source map
 
-**Q2 — Viz refresh method**: Go backend polls Redis directly every 1s (not pub/sub). Reason: update granularity is already 1s, so pub/sub push offers no latency benefit; direct polling keeps the backend stateless (Redis TTL handles expiry, no in-memory accumulation needed).
+| File | Purpose |
+|---|---|
+| `data-contract.ts` | Runtime validators for every payload — `parseGraphMessage`, `parseEdgeDetail`, `parseHistoryPage`. Strict: a page failing any invariant is rejected whole |
+| `use-graph-stream.ts` | WebSocket lifecycle, snapshot/update merge, 1s reconnect |
+| `use-paginated-history.ts` | `/history` paging, frame merge, loaded-range tracking |
+| `history-client.ts` | Typed `/history` fetch |
+| `history-playback.ts` | Scrubber math, 40-minute replay window |
+| `edge-detail-loader.ts` | Debounced `/edge` fetch with per-`src:dest:timestamp` cache |
+| `TrafficGraph.tsx` | Cytoscape setup, host/rack view modes, traffic-intensity filter, SVG detail charts |
+| `App.tsx` | Live/history mode, playback transport |
 
-**Q3 — Browser viz stack**: [vis.js Network](https://visjs.github.io/vis-network/) for the topology graph + [uPlot](https://github.com/leeoniya/uPlot) for time-series plots. Both loaded via CDN, no build toolchain. GSAP rejected (animation library, not a graph/charting library; overkill for a monitoring tool).
-
-### Redis Key Schema (planned)
-
-`traffic:{src_ip}:{dst_ip}` → JSON value with `total_bytes`, `tcp_bytes[]`, `udp_bytes[]`, `tcp_packets[]`, `udp_packets[]`. TTL = 3600s (keys must outlive the DAOS drain window).
-
-Flows are **directed** (`A→B` and `B→A` are separate keys). No client-side deduplication.
+Each of these has a colocated `*.test.ts` (49 tests total).
 
 ### Views
 
-- **Topo view**: rack-aligned layout — server boxes drawn manually via vis.js `beforeDrawing` canvas API; each server box shows NIC ports (NIC0 blue, NIC1 green) as vis.js nodes inside the box. Flow arcs curve to the right with varying roundness so they never overlap. Arc color encodes `total_bytes` on a continuous blue→amber→red gradient; arc width also scales with traffic.
-- **Detail view**: click a flow arc → two uPlot charts: bytes/s (TCP + UDP) and packets/s (TCP + UDP), 60-second scrolling history.
+- **Host view** — one node per topology IP; endpoints absent from the topology are folded into a single `external` node by `collapseExternalSummaries`.
+- **Rack view** — edges aggregated by rack; intra-rack traffic is dropped.
+- **Layout** — Cytoscape `circle` layout, re-run only when the node set changes.
+- **Edge color** — five-bucket log-scaled gradient over `total_bytes`; the legend doubles as a filter.
+- **Detail panel** — hover previews, click pins. Non-aggregate edges fetch `/edge` for the full sub-second arrays and render two SVG charts (packet counts, byte totals).
+- **History mode** — a 40-minute replay window scrubbed at 1 frame/second, paged from `/history` on demand.
 
-A working prototype of this UI lives in `demo.html` at the repo root (mock data, no real Redis).
+`docs/data-contract.md` and `docs/graph-behavior.md` in that submodule document the
+contract and interaction rules in more detail.
 
-### Simulator Gaps (`ld2606_daos_redis/traffic-simulator/simulator_v2.py`)
+---
 
-The simulator partially covers the data-producer role but has four concrete gaps vs the target design:
+## Remaining feature gaps
 
-| # | What | Current | Target |
-|---|------|---------|--------|
-| 1 | **Key schema** | `packet:{destIP}:{srcIP}:{timestamp_ms}` — timestamp baked into the key, one key **per packet** | `traffic:{src_ip}:{dst_ip}` — no timestamp, one key **per flow per second** (aggregated) |
-| 2 | **Write pattern** | Writes every individual packet (100 pps = 100 keys/s/node); no aggregation | Accumulate all packets for a given `(src, dst)` pair over 1s, write one aggregate key at the end of the second |
-| 3 | ~~**TTL**~~ | ~~3600s (1 hour)~~ | ~~2s~~ | **Not a gap** — TTL stays 3600s; a DAOS backend service will drain Redis keys into DAOS before expiry |
-| 4 | **Multi-NIC** | Each simulated node has one IP (`192.168.{node//256}.{node%256}`); no NIC concept | Each node has N NICs, each with a distinct IP — the src/dst IPs in the key must be NIC IPs, not node IDs |
-| 5 | **Bins** | `tcp_bytes[]`, `udp_bytes[]`, etc. are random static arrays of size `--bin-no` | Bins are the actual sub-second samples accumulated during the 1s window (length = number of eBPF poll ticks within that second) |
-
-**What does not need to change**: the threading model (`HPCNode` per node), Redis pipeline batching, and the `SimulatorConfig` / `SimulationController` structure are all reusable.
+1. **Multi-NIC** — the design assumes one collector per NIC with distinct IPs, but nothing in the simulator, topology model, or UI represents a node as a *set* of NIC IPs. One IP is one host throughout.
+2. **Egress collection** — not working end to end; the egress kernel program does not compile and the collector opens a single map path.
+3. **DAOS read path** — the drain archives data but nothing serves it back, so history is bounded by what survives in Redis.
+4. **Observability** — no metrics on drop counts, poll overruns, Redis write latency, or client count. The collector measures write latency and discards it.
+5. **CI** — none in any of the four repositories.

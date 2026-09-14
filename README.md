@@ -88,22 +88,70 @@ docker compose -f compose.dev.yaml --profile tools down
 
 ## Pull Latest Updates
 
-### Update everything at once
+There are two different meanings of "latest" with submodules, and mixing them up is the
+usual source of confusion:
+
+- **The pinned versions** — the commits the parent repo records as known-good together.
+  This is what you want almost always.
+- **The upstream tips** — whatever is newest on each submodule's own `main`. Use this
+  when you deliberately want to move the project forward to newer sub-project code.
+
+### Get the pinned versions (the common case)
 
 ```bash
-# Pull parent repo changes + advance all submodules to their latest remote commit
 git pull
+git submodule update --init --recursive
+```
+
+`git pull` updates the parent repo — including the recorded submodule pointers — but it
+does **not** touch the submodule working trees. The second command is what actually moves
+each submodule to the commit the parent just recorded, and initializes any submodule added
+since your last pull. Run both, always.
+
+To make that automatic for future pulls:
+
+```bash
+git config --global submodule.recurse true
+```
+
+With that set, `git pull` alone also checks out the recorded submodule commits.
+
+### Advance to the upstream tips
+
+```bash
 git submodule update --remote --recursive
 ```
 
-### Update a specific submodule only
+This ignores the recorded pointers and fetches each submodule's default branch tip. The
+submodules then differ from what the parent tracks, so `git status` reports them as
+modified and `git submodule status` prefixes them with `+`. That is expected — record the
+new pointers to finish the job:
 
 ```bash
-git submodule update --remote --merge dpu-telemetry-eBPF
-# or
+git add dpu-telemetry-eBPF ld2606_daos_redis ldrd2606_frontend
+git commit -m "bump submodules to latest upstream"
+git push
+```
+
+Until you commit that, the bump exists only on your machine.
+
+For a single submodule:
+
+```bash
 git submodule update --remote --merge ld2606_daos_redis
-# or
-git submodule update --remote --merge ldrd2606_frontend
+```
+
+### Pull while you have local work in a submodule
+
+`git submodule update` checks out a specific commit and leaves the submodule in **detached
+HEAD**, which will discard uncommitted work there. If you have local changes in a
+submodule, commit or stash them inside that submodule first, then pull on a real branch:
+
+```bash
+cd ld2606_daos_redis
+git checkout main          # attach to a branch first
+git pull
+cd ..
 ```
 
 ### Check submodule status
@@ -112,7 +160,21 @@ git submodule update --remote --merge ldrd2606_frontend
 git submodule status
 ```
 
-A `-` prefix means not yet initialized. A `+` prefix means the checked-out commit differs from what the parent repo tracks (i.e., you have a newer or older commit locally).
+- `-` prefix → not initialized yet (`git submodule update --init`)
+- `+` prefix → the checked-out commit differs from what the parent records → needs a bump commit
+- `U` prefix → merge conflicts inside the submodule
+- no prefix → in sync
+
+`git diff --submodule` shows which commits the pointer moved across.
+
+### Also refresh dependencies
+
+Submodule code moving does not update anything installed from it:
+
+```bash
+cd ldrd2606_frontend && npm install          # after a frontend bump
+cd dpu-telemetry-eBPF/eCounter/v1_userspace-poll && cmake --build build   # after a collector bump
+```
 
 ## How to Work with This Repo
 
@@ -134,21 +196,7 @@ git commit -m "bump dpu-telemetry-eBPF to <sha>"
 git push
 ```
 
-### Pull upstream changes to a submodule
+### Pull upstream changes into a submodule
 
-```bash
-git submodule update --remote --merge dpu-telemetry-eBPF
-git add dpu-telemetry-eBPF
-git commit -m "bump dpu-telemetry-eBPF to <sha>"
-git push
-```
-
-### Check what needs recording
-
-```bash
-git submodule status
-```
-
-- `-` prefix → submodule not initialized yet (`git submodule update --init`)
-- `+` prefix → submodule is ahead of what the parent tracks → needs a bump commit
-- no prefix → in sync
+See [Advance to the upstream tips](#advance-to-the-upstream-tips) above — the bump commit
+in the parent is the part people forget.
