@@ -81,7 +81,7 @@ Clone with `git clone --recurse-submodules <url>`. The parent repo holds only
 `README.md`, `CLAUDE.md`, `TODO.md`, and `docs/`.
 
 Setup walkthroughs live in [docs/setup.md](docs/setup.md) and
-[docs/two-host-real-traffic.md](docs/two-host-real-traffic.md).
+[docs/guide_real-traffic.md](docs/guide_real-traffic.md).
 
 ---
 

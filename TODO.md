@@ -201,10 +201,11 @@ Ordered roughly by severity within each section.
 - [ ] `backend/config/topology.json` contains `192.168.110.0` (a network address,
       hostname `v2-node-00`), left over from v2's IP scheme; v3 starts at `.1`.
       Remove the orphan entry.
-- [ ] `backend/config/topology.ebpf.json` hardcodes Docker bridge IPs
-      (`172.18.0.2-6`), which Docker assigns dynamically — this file breaks
-      whenever the network is recreated. Use static IPs in `compose.dev.yaml` or
-      generate the file at startup.
+- [ ] `ebpf2202` is not working yet and is absent from
+      `backend/config/topology.ebpf.json` (which now holds the real `ebpf`
+      testbed IPs for `ebpf2203` and `ebpf2201`, replacing the old Docker bridge
+      IPs). Add its entry and update `docs/guide_real-traffic.md`'s testbed table
+      once it is online.
 - [ ] Topology is defined **twice**: as a JSON file the Go backend reads
       (`TOPOLOGY_PATH`) and as `topology:node:{ip}` Redis hashes the simulator
       writes (`register_topology`). Only the file is actually consumed. Pick one
@@ -258,7 +259,7 @@ Ordered roughly by severity within each section.
       is wrong.
 - [ ] Commit the pending working-tree changes or explain them: modified
       `ld2606_daos_redis` + `ldrd2606_frontend` submodule pointers, modified
-      `backend/config/topology.json`, untracked `backend/config/topology.ebpf.json`
+      `backend/config/topology.json`, modified `backend/config/topology.ebpf.json`
       and `ldrd2606_frontend/vite.config.local.ts`.
 
 ---

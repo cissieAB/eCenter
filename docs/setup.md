@@ -9,7 +9,7 @@ Choose one traffic source for a run:
 - **Simulator:** generated records → Redis → backend → frontend.
 - **Real telemetry:** incoming IPv4 TCP/UDP traffic → TC ingress map → userspace collector → Redis → backend → frontend.
 
-For a worked example of real telemetry across multiple nodes — including common `sudo`/NFS/SELinux pitfalls and how to register hosts in the topology file — see [two-host-real-traffic.md](two-host-real-traffic.md).
+For a worked example of real telemetry across multiple nodes — including common `sudo`/NFS/SELinux pitfalls and how to register hosts in the topology file — see [guide_real-traffic.md](guide_real-traffic.md).
 
 ## Directories and prerequisites
 
@@ -172,7 +172,7 @@ Install dependencies on first setup and after dependency changes. Open the local
 
 ## Topology and verification
 
-Configure `backend/config/topology.json` in the backend repository with the traffic's source/destination IPs and rack assignments. For real telemetry, these are the addresses observed in packets, which may differ from the Redis machine's management address. Optional `hostname` values are display labels; IPs remain node identities. Restart the backend and reconnect the frontend after topology changes.
+Configure `backend/config/topology.json` in the backend repository with the traffic's source/destination IPs and rack assignments. For real telemetry, these are the addresses observed in packets, which may differ from the Redis machine's management address. Optional `hostname` values are display labels; IPs remain node identities. Restart the backend and reconnect the frontend after topology changes. The full reference is `backend/config/README.md` in the backend repository.
 
 From the backend repository, check central services with the engine used to start them:
 
@@ -188,6 +188,8 @@ If the graph remains empty, check the producer is running, Redis is reachable fr
 
 ## Stop a run
 
-Stop the simulator or each userspace collector with `Ctrl+C`, then stop the frontend with `Ctrl+C`. Stop the foreground Compose process with `Ctrl+C`. Existing Redis data remains subject to its TTL.
+Stop the simulator or each userspace collector with `Ctrl+C`, then stop the frontend with `Ctrl+C`. Stop the foreground Compose process with `Ctrl+C`.
+
+The next launch of the Compose `redis` service starts with an empty database. The previous run's data, including its append-only write log, is moved to `<backend-repo>/redis-archive/YYYYMMDD-HHMMSS/` (launch time, UTC) first. See the backend repository's `GETTING_STARTED.md` for how to inspect an archived run.
 
 Stopping a collector leaves the TC attachment and map pin in place for reuse. For full telemetry teardown, inspect the interface's filters and remove only the attachment and pin created for this run. Remove `clsact` only if it was created for this run and no other filters need it. Avoid deleting all ingress filters on a shared interface.
