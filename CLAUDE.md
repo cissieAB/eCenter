@@ -75,7 +75,7 @@ Three independent sub-projects, each a git submodule with its own `.git` history
 
 - **`dpu-telemetry-eBPF/`** — eBPF DPU network traffic counter (C kernel + C++ userspace) · [github.com/JeffersonLab/dpu-telemetry-eBPF](https://github.com/JeffersonLab/dpu-telemetry-eBPF)
 - **`ld2606_daos_redis/`** — Go backend + Python traffic simulator + DAOS drain worker · [github.com/cissieAB/ld2606_daos_redis](https://github.com/cissieAB/ld2606_daos_redis)
-- **`ldrd2606_frontend/`** — React + Vite + Cytoscape.js dashboard · [github.com/RaiqaRasool/ldrd2606_frontend](https://github.com/RaiqaRasool/ldrd2606_frontend)
+- **`ldrd2606_frontend/`** — React + Vite + Cytoscape.js dashboard · [github.com/cissieAB/ldrd2606_frontend](https://github.com/cissieAB/ldrd2606_frontend) (originally RaiqaRasool/ldrd2606_frontend)
 
 Clone with `git clone --recurse-submodules <url>`. The parent repo holds only
 `README.md`, `CLAUDE.md`, `TODO.md`, and `docs/`.

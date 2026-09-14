@@ -21,7 +21,7 @@ history and upstream:
 eCenter/                  # parent → cissieAB/eCenter
 ├── dpu-telemetry-eBPF/   # eBPF traffic counter        → JeffersonLab/dpu-telemetry-eBPF
 ├── ld2606_daos_redis/    # Go backend, simulator, DAOS → cissieAB/ld2606_daos_redis
-├── ldrd2606_frontend/    # React + Cytoscape dashboard → RaiqaRasool/ldrd2606_frontend
+├── ldrd2606_frontend/    # React + Cytoscape dashboard → cissieAB/ldrd2606_frontend
 ├── docs/                 # guides
 ├── CLAUDE.md             # architecture documentation
 └── TODO.md               # known bugs and open work
@@ -124,9 +124,28 @@ points to has not been pushed:
 git config push.recurseSubmodules check
 ```
 
-Push access differs per upstream. In particular, `ldrd2606_frontend` belongs to
-`RaiqaRasool`; without write access, push frontend changes to a fork and open a pull
-request, then bump the parent pointer after it merges.
+### Frontend repository
+
+`ldrd2606_frontend` points at `cissieAB/ldrd2606_frontend`, a standalone repository (not
+a GitHub fork) created from `RaiqaRasool/ldrd2606_frontend` with its full history. Push
+to it directly; no outside approval is involved. To bring in new commits from the
+original repo, add it once as `upstream` and merge:
+
+```bash
+cd ldrd2606_frontend
+git remote add upstream https://github.com/RaiqaRasool/ldrd2606_frontend.git   # once
+git switch main
+git pull upstream main
+git push
+cd .. && git add ldrd2606_frontend && git commit -m "bump ldrd2606_frontend" && git push
+```
+
+Existing clones made before the switch need to pick up the new submodule URL once:
+
+```bash
+git pull
+git submodule sync ldrd2606_frontend
+```
 
 ### Check submodule status
 

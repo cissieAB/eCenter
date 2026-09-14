@@ -10,5 +10,5 @@
 
 [submodule "ldrd2606_frontend"]
 	path = ldrd2606_frontend
-	url = https://github.com/RaiqaRasool/ldrd2606_frontend.git
+	url = https://github.com/cissieAB/ldrd2606_frontend.git
 	branch = main
