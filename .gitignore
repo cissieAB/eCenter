@@ -1,3 +1,25 @@
+# OS / editor
 .DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Claude Code local state
 .claude/
+
+# Dependencies and build output accidentally created at the top level
+node_modules/
 package-lock.json
+venv/
+.venv/
+__pycache__/
+build/
+dist/
+*.log
+
+# Redis run archives (compose normally writes these inside ld2606_daos_redis/)
+redis-archive/
+
+# Note: files *inside* a submodule are ignored by that submodule's own .gitignore,
+# not this one.

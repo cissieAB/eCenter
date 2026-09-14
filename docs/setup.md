@@ -1,6 +1,6 @@
 # Traffic monitoring setup
 
-This guide covers the Go backend, Redis Stack, React frontend, and either the V2 simulator or the `eCounter/v1_userspace-poll` TC ingress collector.
+This guide covers the Go backend, Redis Stack, React frontend, and either the simulator or the `eCounter/v1_userspace-poll` TC ingress collector.
 
 Run Redis, the backend, and the frontend on the same machine. For real telemetry, run the kernel program and userspace collector on each Linux node whose incoming traffic you want to observe. That can include the machine hosting Redis.
 
@@ -39,27 +39,7 @@ Package names and availability depend on the distribution and enabled repositori
 
 ## Option A: Simulated traffic
 
-In the first terminal, start Redis, the backend, and the simulator container:
-
-```bash
-cd <backend-repo>
-docker compose -f compose.dev.yaml --profile tools up --build
-```
-
-Keep this terminal running. The simulator container starts idle; it does not generate records until you run the script. In a second terminal:
-
-```bash
-cd <backend-repo>
-docker compose -f compose.dev.yaml exec simulator python3 simulator_v2.py --redis-host redis --duration 3600 --mode 1
-```
-
-[Compose exec targets the service name](https://docs.docker.com/reference/cli/docker/compose/exec/), so looking up a container ID is unnecessary. To enter a shell instead, use `docker compose -f compose.dev.yaml exec simulator /bin/bash`, then run the same Python command from `/app`. The image already installs dependencies globally; no virtual environment activation is needed inside it.
-
-Use `--redis-host redis` because `redis` is the Compose service name; the script defaults to `localhost`, which would refer to the simulator container itself. `--duration 3600` runs for one hour; the script default is 10 seconds. Mode 1 stores the hashes consumed by the backend. The default five simulated nodes use `192.168.110.0` through `192.168.110.4`; ensure those IPs appear in the backend topology.
-
-The simulator clears existing `packet:*` records in its selected Redis database when starting. Use this workflow separately from real telemetry when its records need to be retained.
-
-For Podman, use `podman compose` in place of `docker compose` in both commands. Continue with [Start the frontend](#start-the-frontend).
+The simulated-traffic workflow (Redis, backend, `simulator_v3.py`, and frontend) is in the **Local Test** section of [guide_simulator.md](guide_simulator.md).
 
 ## Option B: Real telemetry
 

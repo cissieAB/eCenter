@@ -2,201 +2,154 @@
 
 Real-time multi-node network traffic monitoring and visualization for JLab LDRD 100Gbps testbeds.
 
-See `CLAUDE.md` for the full architecture design and decisions.
+See `CLAUDE.md` for the full architecture design and decisions, and `TODO.md` for known bugs.
 
-For backend, Redis, and React frontend setup using simulated traffic or the TC ingress collector, see the [setup guide](docs/setup.md).
+## Guides
+
+| Guide | Use it for |
+|---|---|
+| [docs/guide_simulator.md](docs/guide_simulator.md) | **Local Test**: the full stack on one machine with simulated traffic |
+| [docs/guide_real-traffic.md](docs/guide_real-traffic.md) | Per-run workflow with eBPF collectors on the `ebpf` testbed |
+| [docs/setup.md](docs/setup.md) | Backend, Redis, frontend, and TC ingress collector setup reference |
 
 ## Repository Structure
 
+eCenter is a thin parent repo. Its code lives in three git submodules, each with its own
+history and upstream:
+
 ```
-eCenter/
-├── dpu-telemetry-eBPF/   # eBPF traffic counter (submodule → JeffersonLab/dpu-telemetry-eBPF)
-├── ld2606_daos_redis/    # Redis backend + simulator + DAOS client (submodule → cissieAB/ld2606_daos_redis)
-├── ldrd2606_frontend/    # React + Vite + Cytoscape.js dashboard (submodule → RaiqaRasool/ldrd2606_frontend)
-└── CLAUDE.md             # Architecture documentation
+eCenter/                  # parent → cissieAB/eCenter
+├── dpu-telemetry-eBPF/   # eBPF traffic counter        → JeffersonLab/dpu-telemetry-eBPF
+├── ld2606_daos_redis/    # Go backend, simulator, DAOS → cissieAB/ld2606_daos_redis
+├── ldrd2606_frontend/    # React + Cytoscape dashboard → RaiqaRasool/ldrd2606_frontend
+├── docs/                 # guides
+├── CLAUDE.md             # architecture documentation
+└── TODO.md               # known bugs and open work
 ```
+
+The parent repo does not store submodule code. It stores a **commit pointer** (SHA) per
+submodule, and `.gitmodules` sets `branch = main` for all three so that
+`git submodule update --remote` follows each submodule's `main`.
 
 ## Clone
 
-Always clone with `--recurse-submodules` to pull all three sub-projects:
-
 ```bash
-git clone --recurse-submodules https://github.com/cissieAB/eCenter.git
+git clone --recurse-submodules git@github.com:cissieAB/eCenter.git
+cd eCenter
+git config submodule.recurse true     # make pull/checkout also update submodules
 ```
 
-If you already cloned without it:
+If you already cloned without `--recurse-submodules`:
 
 ```bash
 git submodule update --init
 ```
 
-## Running the Full Stack Locally
+## Pull
 
-This launches the `ldrd2606_frontend` dashboard talking live to the `ld2606_daos_redis` Go backend, fed by `simulator_v3.py`, backed by Redis Stack — all via the project's own dev Compose file, plus one terminal for the frontend.
+There are two meanings of "latest" with submodules:
 
-### 0. Prerequisites
+- **Pinned**: the submodule commits the parent repo records. This is what a plain
+  `git pull` gives you.
+- **Upstream tips**: the newest commit on each submodule's `main`, which may be ahead of
+  what the parent records.
 
-- Docker (or Podman) with the daemon running — Redis and the backend run in containers, so no local Go toolchain is required
-- Node.js + npm (for the frontend only)
-
-### 1. Start Redis + backend
-
-```bash
-cd ld2606_daos_redis
-docker compose -f compose.dev.yaml --profile tools up -d
-```
-
-This starts three containers: `redis` (Redis Stack, healthchecked), `backend` (`go run .` on `:8080`, hot-reloaded from `./backend` via a volume mount), and `simulator` (idles on `sleep infinity` — a shell to `exec` into, not a traffic generator itself). The `--profile tools` flag is required or the `simulator` container won't be created at all.
-
-Check backend logs: `docker compose -f compose.dev.yaml logs -f backend`. Expect `Index 'idx:packets' created successfully` then `Starting server on :8080`.
-
-### 2. Feed live traffic — use `simulator_v3.py`, not `simulator_bk.py`
-
-```bash
-docker compose -f compose.dev.yaml exec -d simulator python simulator_v3.py --redis-host redis --nodes 8 --duration 999999
-```
-
-This matters more than it looks: only `simulator_v3.py` registers the `topology:nodes` / `topology:node:<ip>` keys that `GET /ws` needs to build its node topology. The frontend **silently drops every edge whose endpoints aren't in that topology** (see `ldrd2606_frontend/docs/data-contract.md`) — so running `simulator_bk.py` or `simulator_v2.py` instead will make the backend report real data (`/latest` populated, poll logs show `pairs=N`) while the dashboard graph stays empty, with no error anywhere to explain why.
-
-Also note `simulator_v3.py` has **no `--publish` flag and no infinite-duration mode** — `--duration` must be an explicit number of seconds (minimum 1), so pass something long-running like `999999` for an interactive session rather than relying on a default that stops after 10s. The backend doesn't need pub/sub anyway; it polls Redis directly every second.
-
-Verify topology + data landed:
-```bash
-docker exec ld2606_daos_redis-redis-1 redis-cli SMEMBERS topology:nodes
-curl -s http://localhost:8080/latest | head -c 300
-```
-
-### 3. Terminal — Frontend
-
-```bash
-cd ldrd2606_frontend
-npm install          # first time, or after a submodule pull
-npm run dev
-```
-
-Open `http://localhost:5173`. Vite proxies `/ws`, `/edge`, and `/history` to `http://localhost:8080` — no env config needed.
-
-### Stopping everything
-
-```bash
-# Ctrl+C in the frontend terminal, then:
-cd ld2606_daos_redis
-docker compose -f compose.dev.yaml --profile tools down
-```
-
-`down` removes the containers and network; the `redis-data`/`go-mod-cache`/`go-build-cache` named volumes persist until you add `-v`.
-
-## Pull Latest Updates
-
-There are two different meanings of "latest" with submodules, and mixing them up is the
-usual source of confusion:
-
-- **The pinned versions** — the commits the parent repo records as known-good together.
-  This is what you want almost always.
-- **The upstream tips** — whatever is newest on each submodule's own `main`. Use this
-  when you deliberately want to move the project forward to newer sub-project code.
-
-### Get the pinned versions (the common case)
+### Pull the pinned versions
 
 ```bash
 git pull
-git submodule update --init --recursive
+git submodule update --init --recursive   # not needed if submodule.recurse is true
 ```
 
-`git pull` updates the parent repo — including the recorded submodule pointers — but it
-does **not** touch the submodule working trees. The second command is what actually moves
-each submodule to the commit the parent just recorded, and initializes any submodule added
-since your last pull. Run both, always.
+`git pull` updates the parent and its recorded pointers but, without
+`submodule.recurse`, leaves the submodule working trees where they were. The second
+command checks each submodule out at the recorded commit, which leaves it in
+**detached HEAD**.
 
-To make that automatic for future pulls:
+### Pull the upstream tips of every submodule
 
 ```bash
-git config --global submodule.recurse true
+git pull
+git submodule update --init
+git submodule foreach 'git switch main && git pull --ff-only'
 ```
 
-With that set, `git pull` alone also checks out the recorded submodule commits.
-
-### Advance to the upstream tips
+This puts every submodule on its `main` branch at `origin/main`, so you can also commit
+there directly. To make this one command, add a local alias once:
 
 ```bash
-git submodule update --remote --recursive
+git config alias.pull-all "!git pull && git submodule update --init && git submodule foreach 'git switch -q main && git pull -q --ff-only'"
+git pull-all
 ```
 
-This ignores the recorded pointers and fetches each submodule's default branch tip. The
-submodules then differ from what the parent tracks, so `git status` reports them as
-modified and `git submodule status` prefixes them with `+`. That is expected — record the
-new pointers to finish the job:
+If a submodule's `main` has moved past the pointer the parent records, `git status` in
+the parent shows it as `modified (new commits)`. Record the new pointer so everyone else
+gets it with a plain `git pull`:
 
 ```bash
 git add dpu-telemetry-eBPF ld2606_daos_redis ldrd2606_frontend
-git commit -m "bump submodules to latest upstream"
+git commit -m "bump submodules to latest main"
 git push
 ```
 
-Until you commit that, the bump exists only on your machine.
+## Develop and push
 
-For a single submodule:
-
-```bash
-git submodule update --remote --merge ld2606_daos_redis
-```
-
-### Pull while you have local work in a submodule
-
-`git submodule update` checks out a specific commit and leaves the submodule in **detached
-HEAD**, which will discard uncommitted work there. If you have local changes in a
-submodule, commit or stash them inside that submodule first, then pull on a real branch:
+Always commit inside the submodule first, push it, and only then record the new pointer
+in the parent. Pushing the parent first publishes a pointer to a commit nobody else can
+fetch.
 
 ```bash
+# 1. Work on a branch inside the submodule (never on a detached HEAD)
 cd ld2606_daos_redis
-git checkout main          # attach to a branch first
-git pull
+git switch main
+git pull --ff-only
+# ... edit ...
+git commit -am "your change"
+git push                              # push the submodule to its own upstream
+
+# 2. Record the new pointer in the parent
 cd ..
+git add ld2606_daos_redis
+git commit -m "bump ld2606_daos_redis: your change"
+git push
 ```
+
+Changes that touch only parent files (`README.md`, `docs/`, `CLAUDE.md`, `TODO.md`) are
+committed and pushed from the eCenter root as in any normal repo.
+
+As a safety net, have `git push` in the parent refuse to push when a submodule commit it
+points to has not been pushed:
+
+```bash
+git config push.recurseSubmodules check
+```
+
+Push access differs per upstream. In particular, `ldrd2606_frontend` belongs to
+`RaiqaRasool`; without write access, push frontend changes to a fork and open a pull
+request, then bump the parent pointer after it merges.
 
 ### Check submodule status
 
 ```bash
 git submodule status
+git submodule foreach 'git status -sb'
 ```
 
-- `-` prefix → not initialized yet (`git submodule update --init`)
-- `+` prefix → the checked-out commit differs from what the parent records → needs a bump commit
-- `U` prefix → merge conflicts inside the submodule
+`git submodule status` prefixes:
+
+- `-` → not initialized yet (`git submodule update --init`)
+- `+` → checked-out commit differs from what the parent records (commit a bump, or run
+  `git submodule update` to go back)
+- `U` → merge conflicts inside the submodule
 - no prefix → in sync
 
-`git diff --submodule` shows which commits the pointer moved across.
+`git diff --submodule` shows which commits a pointer moved across.
 
-### Also refresh dependencies
+### Refresh dependencies after a pull
 
-Submodule code moving does not update anything installed from it:
-
-```bash
-cd ldrd2606_frontend && npm install          # after a frontend bump
-cd dpu-telemetry-eBPF/eCounter/v1_userspace-poll && cmake --build build   # after a collector bump
-```
-
-## How to Work with This Repo
-
-The parent repo stores a **commit pointer** (SHA) for each submodule, not the code itself. Any time a submodule's commit advances — whether you made the change or pulled from upstream — you need to record the new pointer in the parent with a commit. This keeps the parent always tracking exactly which versions of the sub-projects work together.
-
-### Make changes inside a submodule
-
-Submodules start in **detached HEAD** state. Check out a branch before making changes:
+Moving submodule code does not update anything built or installed from it:
 
 ```bash
-cd dpu-telemetry-eBPF
-git checkout main          # or whichever branch you want
-# ... make changes ...
-git commit -am "your change"
-git push
-cd ..
-git add dpu-telemetry-eBPF # stage the new commit pointer
-git commit -m "bump dpu-telemetry-eBPF to <sha>"
-git push
+(cd ldrd2606_frontend && npm install)                                  # frontend
+(cd dpu-telemetry-eBPF/eCounter/v1_userspace-poll && cmake --build build)  # collector
 ```
-
-### Pull upstream changes into a submodule
-
-See [Advance to the upstream tips](#advance-to-the-upstream-tips) above — the bump commit
-in the parent is the part people forget.
