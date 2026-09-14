@@ -78,7 +78,9 @@ Three independent sub-projects, each a git submodule with its own `.git` history
 - **`ldrd2606_frontend/`** — React + Vite + Cytoscape.js dashboard · [github.com/cissieAB/ldrd2606_frontend](https://github.com/cissieAB/ldrd2606_frontend) (originally RaiqaRasool/ldrd2606_frontend)
 
 Clone with `git clone --recurse-submodules <url>`. The parent repo holds only
-`README.md`, `CLAUDE.md`, `TODO.md`, and `docs/`.
+`README.md`, `CLAUDE.md`, `TODO.md`, `docs/`, and `reports/` (dated testbed
+test reports, plus `reports/tools/verify_edge.py`, which checks one edge
+against a traffic run end to end).
 
 Setup walkthroughs live in [docs/setup.md](docs/setup.md) and
 [docs/guide_real-traffic.md](docs/guide_real-traffic.md).
