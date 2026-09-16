@@ -707,12 +707,12 @@ the `--verbose` collector output, against the client's `[SUM] ... sender`
 line. Do this **before** step 6, which deletes the map.
 
 Check the directed edge landed in Redis and the backend (on `ebpf2203`, in
-`$ECENTER/ld2606_daos_redis`). Keys are `packet:{dest_ip}:{source_ip}:{ts}`,
+`$ECENTER/ld2606_daos_redis`). Keys are `block:{dest_ip}:{source_ip}:{ts}`,
 destination first:
 
 ```bash
 # ebpf2201 -> ebpf2203 (key is dest first, then source)
-docker compose -f compose.dev.yaml exec redis redis-cli --scan --pattern "packet:129.57.178.86:129.57.178.85:*" | head
+docker compose -f compose.dev.yaml exec redis redis-cli --scan --pattern "block:129.57.178.86:129.57.178.85:*" | head
 curl -s http://localhost:8080/latest | grep -o '"129.57.178.85:129.57.178.86"'
 ```
 

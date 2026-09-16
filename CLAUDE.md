@@ -23,8 +23,8 @@ A **real-time, multi-node network traffic monitoring and visualization system** 
           └──────────────────────────┼──────────────────────────┘
                                      ↓
                         Redis Stack (shared, remote)
-                        HSET packet:{dest_ip}:{source_ip}:{ts}
-                        TTL = 3600s · RediSearch index idx:packets
+                        HSET block:{dest_ip}:{source_ip}:{ts}
+                        TTL = 3600s · RediSearch index idx:blocks
                                      ↓
                        Go backend (1s ticker)         DAOS drain worker
                        FT.AGGREGATE/FT.SEARCH          (drains Redis → DAOS)
@@ -45,15 +45,19 @@ A **real-time, multi-node network traffic monitoring and visualization system** 
 ```
 
 **What each producer writes per second** — one Redis **hash** per directed flow per second,
-key `packet:{dest_ip}:{source_ip}:{timestamp}`, TTL 3600s:
+key `block:{dest_ip}:{source_ip}:{timestamp}`, TTL 3600s:
 
 | Field | Type | Notes |
 |---|---|---|
 | `timestamp` | int | Unix seconds; indexed and sortable |
 | `source_ip`, `dest_ip` | string | dotted-quad IPv4 |
 | `samples_per_second` | int | array length; the collector's poll Hz |
-| `total_packets`, `total_bytes` | int | `total_bytes` is indexed |
-| `tcp_bytes`, `tcp_packets`, `udp_bytes`, `udp_packets` | JSON array string | one entry per sub-second poll tick |
+| `total_blocks`, `total_bytes` | int | `total_bytes` is indexed |
+| `tcp_bytes`, `tcp_blocks`, `udp_bytes`, `udp_blocks` | JSON array string | one entry per sub-second poll tick |
+
+A **block** is one buffer as seen by the eBPF hook. Under GRO/TSO one block can hold
+many wire packets, so `*_blocks` counts are not wire-packet counts. Test reports dated
+before 2026-09-16 predate this rename and show `packet:` keys / `*_packets` fields.
 
 Note the key puts **dest before source**, while every JSON/HTTP payload orders them
 `src` then `dest`. All three producers/consumers agree on this
@@ -167,7 +171,7 @@ struct traffic_key_t {
     __u8  proto;            // IPPROTO_TCP / IPPROTO_UDP only
     __u8  pad[3];           // BPF verifier requires 4-byte key alignment
 };
-struct traffic_val_t { __u64 packets; __u64 bytes; };
+struct traffic_val_t { __u64 blocks; __u64 bytes; };
 ```
 
 Map type `BPF_MAP_TYPE_LRU_HASH`, `max_entries` 2048. Note this key is
@@ -210,8 +214,8 @@ comparable.
 
 ```
 simulator_v3.py (or tc_collector)
-  └─ HSET packet:{dest}:{src}:{ts}  → Redis Stack
-                                        ↓  FT.AGGREGATE / FT.SEARCH on idx:packets
+  └─ HSET block:{dest}:{src}:{ts}   → Redis Stack
+                                        ↓  FT.AGGREGATE / FT.SEARCH on idx:blocks
                                   Go Backend
                                     ├─ 1s poller → selected live frame (RWMutex)
                                     ├─ GET  /latest   → snapshot
@@ -223,7 +227,7 @@ simulator_v3.py (or tc_collector)
 ```
 
 Redis must be **Redis Stack** (or otherwise have the RediSearch module): the
-backend creates and queries the `idx:packets` index and will not work against
+backend creates and queries the `idx:blocks` index and will not work against
 plain Redis.
 
 ### Backend (Go)
@@ -256,7 +260,7 @@ There is no `REDIS_CHANNEL` and no pub/sub — that path was replaced by RediSea
 |---|---|
 | `GET /latest` | `{type, data}` snapshot of the current live frame |
 | `GET /edge?src=&dest=` | Full sample arrays for one directed edge, latest frame |
-| `GET /edge?src=&dest=&timestamp=` | Same, read directly from the `packet:` key at that second |
+| `GET /edge?src=&dest=&timestamp=` | Same, read directly from the `block:` key at that second |
 | `GET /history?start=&end=&limit=` | Paginated `HistoryFrame` list; `limit` 1–120, default 60 |
 | `GET /ws` | Sends `{type:"snapshot", topology, data}` first, then a snapshot per poll |
 | `GET /` | Health check — currently answers 200 for *any* unmatched path |
@@ -307,7 +311,7 @@ rate is `N*(N-1)` records/second.
 
 ### DAOS drain worker
 
-`daos-client/redis_daos_drain.py` scans `packet:*`, bulk-writes to a DAOS DDict via
+`daos-client/redis_daos_drain.py` scans `block:*`, bulk-writes to a DAOS DDict via
 `pydaos`, then **deletes the drained keys from Redis**. It needs DAOS client
 libraries on `LD_LIBRARY_PATH`/`PYTHONPATH`; `--dry-run` skips the DAOS write but
 still deletes.
@@ -376,7 +380,7 @@ Each of these has a colocated `*.test.ts` (49 tests total).
 - **Rack view** — edges aggregated by rack; intra-rack traffic is dropped.
 - **Layout** — Cytoscape `circle` layout, re-run only when the node set changes.
 - **Edge color** — five-bucket log-scaled gradient over `total_bytes`; the legend doubles as a filter.
-- **Detail panel** — hover previews, click pins. Non-aggregate edges fetch `/edge` for the full sub-second arrays and render two SVG charts (packet counts, byte totals).
+- **Detail panel** — hover previews, click pins. Non-aggregate edges fetch `/edge` for the full sub-second arrays and render two SVG charts (block counts, byte totals).
 - **History mode** — a 40-minute replay window scrubbed at 1 frame/second, paged from `/history` on demand.
 
 `docs/data-contract.md` and `docs/graph-behavior.md` in that submodule document the

@@ -45,7 +45,7 @@ docker compose -f compose.dev.yaml logs -f backend
 ```
 
 Expect `Starting server on :8080`. On a fresh Redis you will also see
-`Index 'idx:packets' created successfully`.
+`Index 'idx:blocks' created successfully`.
 
 ### 2. Feed live traffic with `simulator_v3.py`
 
@@ -61,7 +61,7 @@ docker compose -f compose.dev.yaml exec -d simulator \
   point at the simulator container itself.
 - **`--duration` must be an explicit number of seconds** (minimum 1; default 10). Pass a
   large value such as `999999` for an interactive session.
-- **The simulator deletes existing `packet:*` keys when it starts.** Do not point it at a
+- **The simulator deletes existing `block:*` keys when it starts.** Do not point it at a
   Redis instance holding real telemetry you want to keep.
 
 Other flags: `--nodes` (1–255, default 5), `--nodes-per-rack` (default 4),
@@ -86,11 +86,11 @@ not read them.
 #### Verify data landed
 
 ```bash
-docker compose -f compose.dev.yaml exec redis redis-cli --scan --pattern 'packet:*' | head
+docker compose -f compose.dev.yaml exec redis redis-cli --scan --pattern 'block:*' | head
 curl -s http://localhost:8080/latest | head -c 300
 ```
 
-Keys have the form `packet:{dest_ip}:{source_ip}:{timestamp}`. Note that the destination
+Keys have the form `block:{dest_ip}:{source_ip}:{timestamp}`. Note that the destination
 comes first.
 
 ### 3. Start the frontend

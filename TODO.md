@@ -27,14 +27,14 @@ Ordered roughly by severity within each section.
       (`FT.AGGREGATE ... WITHCURSOR`) or page per timestamp.
 - [ ] `redis_document.go:37-45` silently swallows `json.Unmarshal` errors, so a
       corrupt array becomes `nil`, which `validHistoryPacket` then rejects with no
-      log line anywhere. Return the decode error (`docToPacket` never returns one
+      log line anywhere. Return the decode error (`docToBlock` never returns one
       today, so the caller's error handling at `history.go:142` is dead code).
 - [ ] `utils.go:7-22` — `parseIntField` uses `fmt.Sscanf("%d")`, which happily
       parses `"12abc"` as `12`. Use `strconv.Atoi` and fail loudly.
 
 ### DAOS drain worker (`ld2606_daos_redis/daos-client/redis_daos_drain.py`)
 
-- [ ] **Design conflict**: the drain deletes `packet:*` keys after archiving
+- [ ] **Design conflict**: the drain deletes `block:*` keys after archiving
       (`_drain_cycle`, step 4), but the Go backend serves both `/history` and
       `/edge?timestamp=` from those same keys. With the default `--interval 10`,
       the frontend's 40-minute replay window (`HISTORY_DURATION_SECONDS`) can
@@ -169,7 +169,7 @@ Ordered roughly by severity within each section.
       clock.
 - [ ] `setup()` does `delete(*keys)` on the full `scan_iter` result — with a large
       keyspace this is one enormous command. Delete in batches.
-- [ ] `setup()` cleans `packet:*` but never `topology:*`, so stale nodes from a
+- [ ] `setup()` cleans `block:*` but never `topology:*`, so stale nodes from a
       previous run with a different `--nodes` linger.
 - [ ] `node_id_to_ip` maps node 254 to `192.168.110.255` (a broadcast address) at
       the documented `--nodes` maximum of 255. Cap at 254 or shift the range.
