@@ -85,9 +85,6 @@ Ordered roughly by severity within each section.
 - [ ] `max_entries` is 2048 in all three kernel programs, but the key is now
       (src, dst, proto) instead of (ip, proto) — cardinality is squared. On a
       100 Gbps testbed this will silently evict. Size it from expected flow count.
-- [ ] The XDP program still counts `ip->tot_len` (no L2 header; `skb->len` does
-      not exist before the skb is allocated), so its byte counts are not
-      comparable with the TC programs'.
 
 ---
 

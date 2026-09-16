@@ -7,7 +7,7 @@ Two subcommands:
            every new frame for the edge, in both directions, to a JSONL file.
            Start it before the traffic and stop it (Ctrl-C) afterwards.
 
-  compare  Read the per-second Redis hashes packet:{dest}:{src}:{ts} for the
+  compare  Read the per-second Redis hashes block:{dest}:{src}:{ts} for the
            window and report totals, per-second rates, internal consistency,
            and, optionally, agreement with a reference byte count (iperf3) and
            with the frames captured by `record`.
@@ -52,13 +52,13 @@ def cmd_record(a):
 def load_series(r, src, dest, start, end):
     rows = {}
     for t in range(start, end + 1):
-        h = r.hgetall(f"packet:{dest}:{src}:{t}")  # key order: dest first
+        h = r.hgetall(f"block:{dest}:{src}:{t}")  # key order: dest first
         if not h:
             continue
         tcp_b, udp_b = json.loads(h["tcp_bytes"]), json.loads(h["udp_bytes"])
         rows[t] = {
             "bytes": int(h["total_bytes"]),
-            "packets": int(h["total_packets"]),
+            "blocks": int(h["total_blocks"]),
             "sps": int(h["samples_per_second"]),
             "nsamples": len(tcp_b),
             "array_sum": sum(tcp_b) + sum(udp_b),
@@ -126,16 +126,16 @@ def cmd_compare(a):
     fwd = load_series(r, a.src, a.dest, a.start, a.end)
     rev = load_series(r, a.dest, a.src, a.start, a.end)
     if not fwd:
-        sys.exit(f"no packet:{a.dest}:{a.src}:* keys in [{a.start}, {a.end}] (expired? TTL is 3600s)")
+        sys.exit(f"no block:{a.dest}:{a.src}:* keys in [{a.start}, {a.end}] (expired? TTL is 3600s)")
 
     busy = [t for t in sorted(fwd) if fwd[t]["bytes"] * 8 >= a.busy_gbps * 1e9]
     b = sum(v["bytes"] for v in fwd.values())
-    p = sum(v["packets"] for v in fwd.values())
+    p = sum(v["blocks"] for v in fwd.values())
     print(f"edge {a.src} -> {a.dest}, window {a.start}..{a.end} ({fmt(a.start)}-{fmt(a.end)})")
     print(f"  seconds present      {len(fwd)} of {a.end - a.start + 1}; missing: "
           f"{[fmt(t) for t in range(a.start, a.end + 1) if t not in fwd][:10]}")
     print(f"  total_bytes          {b:,}  ({b / 2**30:.3f} GiB)")
-    print(f"  total_packets        {p:,}  (avg {b / max(p, 1):,.0f} B per counted packet)")
+    print(f"  total_blocks         {p:,}  (avg {b / max(p, 1):,.0f} B per counted block)")
     print(f"  tcp / udp bytes      {sum(v['tcp_bytes'] for v in fwd.values()):,} / "
           f"{sum(v['udp_bytes'] for v in fwd.values()):,}")
     if busy:
@@ -146,7 +146,7 @@ def cmd_compare(a):
     bad = [t for t in fwd if fwd[t]["array_sum"] != fwd[t]["bytes"] or fwd[t]["nsamples"] != fwd[t]["sps"]]
     print(f"  inconsistent seconds {len(bad)} (sample arrays must sum to total_bytes, length = sps)")
     rb = sum(v["bytes"] for v in rev.values())
-    print(f"  reverse {a.dest} -> {a.src}: {rb:,} bytes, {sum(v['packets'] for v in rev.values()):,} packets")
+    print(f"  reverse {a.dest} -> {a.src}: {rb:,} bytes, {sum(v['blocks'] for v in rev.values()):,} blocks")
 
     if a.ref_bytes:
         diff = b - a.ref_bytes
@@ -162,7 +162,7 @@ def cmd_compare(a):
         print(f"\nNIC rx delta           {a.nic_bytes:,} bytes, {a.nic_packets:,} wire packets")
         print(f"  NIC - reference      {nd:+,}; expected {a.nic_packets:,} x {a.l3l4_header + 14} B = {nh:,}; "
               f"unexplained {nd - nh:+,}")
-        print(f"  wire packets per counted packet (GRO factor) {a.nic_packets / max(p, 1):.2f}")
+        print(f"  wire packets per counted block (GRO factor) {a.nic_packets / max(p, 1):.2f}")
 
     if a.served:
         served = {}
@@ -179,15 +179,15 @@ def cmd_compare(a):
             print(f"  frame lag (wall - timestamp) median {lags[len(lags) // 2]:.2f}s, max {lags[-1]:.2f}s")
 
     if a.per_second:
-        print("\nper second: time  Gbps  packets  min/max sub-second Gbps")
+        print("\nper second: time  Gbps  blocks   min/max sub-second Gbps")
         for t in range(a.start, a.end + 1):
             v = fwd.get(t)
             if v is None:
                 print(f"  {fmt(t)}  MISSING")
                 continue
-            tcp, udp = r.hmget(f"packet:{a.dest}:{a.src}:{t}", "tcp_bytes", "udp_bytes")
+            tcp, udp = r.hmget(f"block:{a.dest}:{a.src}:{t}", "tcp_bytes", "udp_bytes")
             s = [(x + y) * 8 * v["sps"] / 1e9 for x, y in zip(json.loads(tcp), json.loads(udp))]
-            print(f"  {fmt(t)}  {v['bytes'] * 8 / 1e9:6.2f}  {v['packets']:>8,}  {min(s):5.1f}/{max(s):5.1f}")
+            print(f"  {fmt(t)}  {v['bytes'] * 8 / 1e9:6.2f}  {v['blocks']:>8,}  {min(s):5.1f}/{max(s):5.1f}")
 
 
 def main():
@@ -209,9 +209,9 @@ def main():
     cmp_.add_argument("--ref-bytes", type=int, help="reference byte count, e.g. iperf3 -n size in bytes")
     cmp_.add_argument("--l3l4-header", type=int, default=52,
                       help="IP + L4 header bytes per packet: 52 for TCP with timestamps, 28 for UDP")
-    cmp_.add_argument("--l2-header", type=int, default=14,
-                      help="Ethernet header bytes eBPF counts per packet: 14 for TC, or 0 for XDP "
-                           "and for TC runs before the switch from ip->tot_len to skb->len")
+    cmp_.add_argument("--l2-header", type=int, default=0,
+                      help="Ethernet header bytes eBPF counts per packet: 0, since all programs count "
+                           "ip->tot_len; 14 only for TC runs made while TC counted skb->len")
     cmp_.add_argument("--nic-bytes", type=int, help="receiver NIC rx_bytes delta over the run")
     cmp_.add_argument("--nic-packets", type=int, help="receiver NIC rx_packets delta over the run")
     cmp_.add_argument("--served", help="JSONL written by `record`")
