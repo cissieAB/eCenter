@@ -8,21 +8,6 @@ Ordered roughly by severity within each section.
 
 ## A. Blockers / correctness bugs
 
-### eBPF kernel programs (`dpu-telemetry-eBPF/eCounter/v1_userspace-poll/`)
-
-- [ ] `kernel_egress_tc.c:55` does not compile — it initializes `.ip = ip->daddr`,
-      but `tc_common.h:15-23` renamed the field to `source_ip`/`destination_ip`.
-      Only `kernel_ingress_tc.c` was migrated to the two-IP key.
-- [ ] `kernel_ingress_xdp.c:55` has the same break (`.ip = ip->saddr`). This means
-      `compile_kernel.sh` fails on 2 of the 3 objects it claims to build, and the
-      "All kernel programs compiled successfully" message is unreachable.
-- [ ] `kernel_egress_tc.c` is missing `char _license[] SEC("license") = "GPL";`
-      (both other kernel files have it) — the program will be rejected or
-      restricted at load time.
-- [ ] Once egress/XDP are migrated to the two-IP key, they must also apply the
-      same `saddr`-and-`daddr` semantics the collector assumes; today egress keys
-      on destination only, so a migrated egress map would carry a zero source IP.
-
 ### Go backend (`ld2606_daos_redis/backend/`)
 
 - [ ] `history.go:66-74` + `history.go:158-190` disagree: `paginateHistoryTimestamps`
@@ -100,11 +85,9 @@ Ordered roughly by severity within each section.
 - [ ] `max_entries` is 2048 in all three kernel programs, but the key is now
       (src, dst, proto) instead of (ip, proto) — cardinality is squared. On a
       100 Gbps testbed this will silently evict. Size it from expected flow count.
-- [x] Byte counts use `bpf_ntohs(ip->tot_len)` (L3 and above), excluding the
-      14-byte Ethernet header. Fixed for TC, which now uses `skb->len`
-      ([dpu-telemetry-eBPF#14](https://github.com/JeffersonLab/dpu-telemetry-eBPF/issues/14)).
-- [ ] The XDP program still counts `ip->tot_len` (no L2 header), so its byte
-      counts are not comparable with the TC programs'.
+- [ ] The XDP program still counts `ip->tot_len` (no L2 header; `skb->len` does
+      not exist before the skb is allocated), so its byte counts are not
+      comparable with the TC programs'.
 
 ---
 
@@ -222,10 +205,9 @@ Ordered roughly by severity within each section.
       dependency fails at link with an opaque error); no default
       `CMAKE_BUILD_TYPE`, so the `-O2` the file header advertises is not applied;
       no `-Wall -Wextra`.
-- [ ] `compile_kernel.sh` runs `sudo clang`, producing root-owned `.o` files for no
-      reason. Drop the `sudo`.
-- [ ] `tc_userspace.cpp` requires `1000000 % poll_hz == 0` (so 3 Hz, 7 Hz, 300 Hz
-      are rejected) and this is documented nowhere; `print_usage` also omits `-v`.
+- [ ] `tc_userspace.cpp`'s `print_usage` omits `-v` and does not mention that
+      `-p` must divide 1000000 (3 Hz, 7 Hz, 300 Hz are rejected). The file header
+      also advertises `--poll-frequency`, but the parser accepts `--poll-hz`.
 
 ---
 
@@ -234,35 +216,15 @@ Ordered roughly by severity within each section.
 - [ ] **No CI in any of the four repos.** Add a workflow that at minimum runs
       `go vet` + `go test` (backend), `npm run lint` + `npm test` (frontend), and
       `compile_kernel.sh` / `cmake --build` (eBPF) — the last would have caught
-      the two kernel compile breaks above on the commit that introduced them.
-- [ ] Go test coverage is one file (`handlers_test.go`, 83 lines). Nothing covers
-      `history.go` pagination, `live.go` window selection, `state.go`,
+      the egress/XDP kernel compile breaks on the commit that introduced them.
+- [ ] Go test coverage is two files (`handlers_test.go`, `redis_index_test.go`).
+      Nothing covers `history.go` pagination, `live.go` window selection, `state.go`,
       `topology.go`, or `redis_document.go` decoding — which is exactly where the
       correctness bugs in section A live. Add table tests with a fake Redis.
 - [ ] No Python tests for the simulator or the drain worker.
 - [ ] Add one contract test that asserts the Go `/history` response satisfies the
       frontend's `parseHistoryPage` invariants (shared fixtures), so the
       `next_start` class of bug cannot recur.
-- [x] `CLAUDE.md` rewritten against the actual tree (2026-09-10). Corrected: the
-      `packet:{dest}:{src}:{ts}` key schema and RediSearch polling (was
-      `traffic:{src}:{dst}` + `SCAN` + a pub/sub `REDIS_CHANNEL`); Cytoscape.js
-      with inline SVG charts (was vis.js Network + uPlot via CDN); the
-      `ldrd2606_frontend` submodule as a first-class project (was a planned
-      `viz/` directory and a `demo.html` prototype that does not exist);
-      `eCounter/v1_userspace-poll/` paths (was `traffic_counter/`); the
-      collector's real CLI including the Redis flags and the
-      divisor-of-1000000 poll constraint (was `-p 10–4000`); `SERVER_PORT`
-      needing its leading colon; the Cytoscape `circle` layout (was a
-      rack-aligned canvas with NIC port boxes); and `simulator_v3.py` as the
-      current simulator, replacing the stale v2 "Simulator Gaps" table.
-- [ ] The root README claims the frontend "silently drops every edge whose
-      endpoints aren't in that topology", but `collapseExternalSummaries` folds
-      unknown endpoints into an `external` node. Re-verify and correct whichever
-      is wrong.
-- [ ] Commit the pending working-tree changes or explain them: modified
-      `ld2606_daos_redis` + `ldrd2606_frontend` submodule pointers, modified
-      `backend/config/topology.json`, modified `backend/config/topology.ebpf.json`
-      and `ldrd2606_frontend/vite.config.local.ts`.
 
 ---
 
@@ -273,7 +235,7 @@ Ordered roughly by severity within each section.
       set of NIC IPs. Both `topology.json` and the frontend treat one IP as one
       host.
 - [ ] Egress collection is unimplemented end to end: the egress kernel program
-      does not build, and the collector only ever opens one map path.
+      now builds, but the collector only ever opens one map path.
 - [ ] The DAOS side is a drain script with no read path — nothing serves archived
       data back to the UI, so history is bounded by whatever survives in Redis.
 - [ ] No metrics/observability on any component (drop counts, poll overruns, Redis
