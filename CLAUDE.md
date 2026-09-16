@@ -174,8 +174,9 @@ Map type `BPF_MAP_TYPE_LRU_HASH`, `max_entries` 2048. Note this key is
 (src, dst, proto) — cardinality is squared relative to the older single-IP key,
 so 2048 entries is likely undersized for a 100G testbed (TODO.md §A).
 
-Byte counts come from `bpf_ntohs(ip->tot_len)`, i.e. L3 and above — the Ethernet
-header is not counted.
+Byte counts are the full frame including the 14-byte Ethernet header —
+`skb->len` on the TC programs, `data_end - data` on XDP. Runs before this change
+(e.g. the 2026-09-14 reports) counted `ip->tot_len`, L3 and above only.
 
 ### Collector behavior
 

@@ -152,8 +152,9 @@ def cmd_compare(a):
         diff = b - a.ref_bytes
         print(f"\nreference (iperf3)     {a.ref_bytes:,} bytes")
         print(f"  eBPF - reference     {diff:+,} ({diff / a.ref_bytes * 100:+.3f}%)")
-        hdr = p * a.l3l4_header
-        print(f"  expected L3+L4 hdrs  {p:,} x {a.l3l4_header} B = {hdr:,}")
+        per_pkt = a.l2_header + a.l3l4_header
+        hdr = p * per_pkt
+        print(f"  expected L2-L4 hdrs  {p:,} x {per_pkt} B = {hdr:,}")
         print(f"  unexplained          {diff - hdr:+,} bytes ({(diff - hdr) / a.ref_bytes * 100:+.4f}%)")
     if a.nic_bytes and a.nic_packets and a.ref_bytes:
         nd = a.nic_bytes - a.ref_bytes
@@ -208,6 +209,9 @@ def main():
     cmp_.add_argument("--ref-bytes", type=int, help="reference byte count, e.g. iperf3 -n size in bytes")
     cmp_.add_argument("--l3l4-header", type=int, default=52,
                       help="IP + L4 header bytes per packet: 52 for TCP with timestamps, 28 for UDP")
+    cmp_.add_argument("--l2-header", type=int, default=14,
+                      help="Ethernet header bytes eBPF counts per packet: 14, or 0 for runs "
+                           "before the collector switched from ip->tot_len to skb->len")
     cmp_.add_argument("--nic-bytes", type=int, help="receiver NIC rx_bytes delta over the run")
     cmp_.add_argument("--nic-packets", type=int, help="receiver NIC rx_packets delta over the run")
     cmp_.add_argument("--served", help="JSONL written by `record`")

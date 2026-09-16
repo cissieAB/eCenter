@@ -100,9 +100,9 @@ Ordered roughly by severity within each section.
 - [ ] `max_entries` is 2048 in all three kernel programs, but the key is now
       (src, dst, proto) instead of (ip, proto) — cardinality is squared. On a
       100 Gbps testbed this will silently evict. Size it from expected flow count.
-- [ ] Byte counts use `bpf_ntohs(ip->tot_len)` (L3 and above), excluding the
-      14-byte Ethernet header, so reported throughput under-counts wire bytes by
-      ~1 % at 1500 MTU. Use `skb->len` on the TC path if wire-accurate is wanted.
+- [x] Byte counts use `bpf_ntohs(ip->tot_len)` (L3 and above), excluding the
+      14-byte Ethernet header. Fixed: TC uses `skb->len`, XDP `data_end - data`
+      ([dpu-telemetry-eBPF#14](https://github.com/JeffersonLab/dpu-telemetry-eBPF/issues/14)).
 
 ---
 
