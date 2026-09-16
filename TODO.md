@@ -101,8 +101,10 @@ Ordered roughly by severity within each section.
       (src, dst, proto) instead of (ip, proto) — cardinality is squared. On a
       100 Gbps testbed this will silently evict. Size it from expected flow count.
 - [x] Byte counts use `bpf_ntohs(ip->tot_len)` (L3 and above), excluding the
-      14-byte Ethernet header. Fixed: TC uses `skb->len`, XDP `data_end - data`
+      14-byte Ethernet header. Fixed for TC, which now uses `skb->len`
       ([dpu-telemetry-eBPF#14](https://github.com/JeffersonLab/dpu-telemetry-eBPF/issues/14)).
+- [ ] The XDP program still counts `ip->tot_len` (no L2 header), so its byte
+      counts are not comparable with the TC programs'.
 
 ---
 

@@ -210,8 +210,8 @@ def main():
     cmp_.add_argument("--l3l4-header", type=int, default=52,
                       help="IP + L4 header bytes per packet: 52 for TCP with timestamps, 28 for UDP")
     cmp_.add_argument("--l2-header", type=int, default=14,
-                      help="Ethernet header bytes eBPF counts per packet: 14, or 0 for runs "
-                           "before the collector switched from ip->tot_len to skb->len")
+                      help="Ethernet header bytes eBPF counts per packet: 14 for TC, or 0 for XDP "
+                           "and for TC runs before the switch from ip->tot_len to skb->len")
     cmp_.add_argument("--nic-bytes", type=int, help="receiver NIC rx_bytes delta over the run")
     cmp_.add_argument("--nic-packets", type=int, help="receiver NIC rx_packets delta over the run")
     cmp_.add_argument("--served", help="JSONL written by `record`")
